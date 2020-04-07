@@ -66,14 +66,23 @@ extern "C" {
 #include "drreg.h"
 #include "drutil.h"
 #include "utils.h"
+}
+
+#include "/home/mario/Masterarbeit/memory_metrics/include/memory_metrics/FootprintCalculator.h++"
+using memory_metrics::FootprintCalculator ;
+
+//#include "/home/mario/Masterarbeit/memory_metrics/include/memory_metrics/MemoryReference.h++"
+
+
+//using memory_metrics::MemoryReference;
 
 
 /* Each mem_ref_t includes the type of reference (read or write),
  * the address referenced, and the size of the reference.
  */
-typedef struct _mem_ref_t {
-    void *addr;
-} mem_ref_t;
+//typedef struct _mem_ref_t {
+//    void *address;
+//} mem_ref_t;
 
 /* Max number of mem_ref a buffer can have */
 #define MAX_NUM_MEM_REFS 8192
@@ -90,9 +99,9 @@ typedef struct {
     ptr_int_t buf_end;
     void *cache;
     file_t log;
-#if OUTPUT_TEXT
+
     FILE *logf;
-#endif
+
     uint64 num_refs;
 } per_thread_t;
 
@@ -232,11 +241,10 @@ event_thread_init(void *drcontext)
                       DR_FILE_CLOSE_ON_FORK |
 #endif
                           DR_FILE_ALLOW_LARGE);
-#if OUTPUT_TEXT
+
     data->logf = log_stream_from_file(data->log);
     fprintf(data->logf,
             "Format: <instr address>,<(r)ead/(w)rite>,<data size>,<data address>\n");
-#endif
 }
 
 static void
@@ -249,11 +257,9 @@ event_thread_exit(void *drcontext)
     dr_mutex_lock(mutex);
     global_num_refs += data->num_refs;
     dr_mutex_unlock(mutex);
-#ifdef OUTPUT_TEXT
+
     log_stream_close(data->logf); /* closes fd too */
-#else
-    log_file_close(data->log);
-#endif
+
     dr_thread_free(drcontext, data->buf_base, MEM_BUF_SIZE);
     dr_thread_free(drcontext, data, sizeof(per_thread_t));
 }
@@ -303,25 +309,29 @@ static void
 memtrace(void *drcontext)
 {
     per_thread_t *data;
-    int num_refs;
-    mem_ref_t *mem_ref;
+    std::uint64_t num_refs;
+    mem_ref_t* mem_ref;
 
     data = (per_thread_t*)drmgr_get_tls_field(drcontext, tls_index);
     mem_ref = (mem_ref_t *)data->buf_base;
     num_refs = (int)((mem_ref_t *)data->buf_ptr - mem_ref);
 
-#ifdef OUTPUT_TEXT
+    FootprintCalculator footprintCalculator{mem_ref, num_refs};
+
+    for (std::uint64_t i = 0; i < num_refs; i++) {
+    	auto const w = pow(2, i);
+    	if (w > num_refs) break;
+    	auto const averageFootprint = footprintCalculator.calculateAverageFootprint(w);
+    	fprintf(data->logf, "%f: %f \n", w, averageFootprint);
+    }
     /* We use libc's fprintf as it is buffered and much faster than dr_fprintf
      * for repeated printing that dominates performance, as the printing does here.
      */
-    for (i = 0; i < num_refs; i++) {
-        /* We use PIFX to avoid leading zeroes and shrink the resulting file. */
-        fprintf(data->logf, PIFX "\n", (ptr_uint_t)mem_ref->addr);
-        ++mem_ref;
-    }
-#else
-    dr_write_file(data->log, data->buf_base, (size_t)(data->buf_ptr - data->buf_base));
-#endif
+//    for (int i = 0; i < num_refs; i++) {
+//        /* We use PIFX to avoid leading zeroes and shrink the resulting file. */
+//        fprintf(data->logf, PIFX "\n", (ptr_uint_t)mem_ref->address);
+//        ++mem_ref;
+//    }
 
     memset(data->buf_base, 0, MEM_BUF_SIZE);
     data->num_refs += num_refs;
@@ -382,7 +392,7 @@ instrument_mem(void *drcontext, instrlist_t *ilist, instr_t *where, int pos, boo
     reg_id_t reg1, reg2;
     drvector_t allowed;
     per_thread_t *data;
-    app_pc pc;
+//    app_pc pc;
 
     data = (per_thread_t*)drmgr_get_tls_field(drcontext, tls_index);
 
@@ -431,7 +441,7 @@ instrument_mem(void *drcontext, instrlist_t *ilist, instr_t *where, int pos, boo
 //    instrlist_meta_preinsert(ilist, where, instr);
 
     /* Store address in memory ref */
-    opnd1 = OPND_CREATE_MEMPTR(reg2, offsetof(mem_ref_t, addr));
+    opnd1 = OPND_CREATE_MEMPTR(reg2, offsetof(mem_ref_t, address));
     opnd2 = opnd_create_reg(reg1);
     instr = INSTR_CREATE_mov_st(drcontext, opnd1, opnd2);
     instrlist_meta_preinsert(ilist, where, instr);
@@ -516,6 +526,4 @@ instrument_mem(void *drcontext, instrlist_t *ilist, instr_t *where, int pos, boo
     if (drreg_unreserve_register(drcontext, ilist, where, reg1) != DRREG_SUCCESS ||
         drreg_unreserve_register(drcontext, ilist, where, reg2) != DRREG_SUCCESS)
         DR_ASSERT(false);
-}
-
 }

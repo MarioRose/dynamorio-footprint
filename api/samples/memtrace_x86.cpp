@@ -56,6 +56,8 @@
  * than creating a binary file; thus, the default is binary.
  */
 
+extern "C" {
+
 #include <stdio.h>
 #include <string.h> /* for memset */
 #include <stddef.h> /* for offsetof */
@@ -64,6 +66,7 @@
 #include "drreg.h"
 #include "drutil.h"
 #include "utils.h"
+
 
 /* Each mem_ref_t includes the type of reference (read or write),
  * the address referenced, and the size of the reference.
@@ -210,9 +213,9 @@ event_thread_init(void *drcontext)
     per_thread_t *data;
 
     /* allocate thread private data */
-    data = dr_thread_alloc(drcontext, sizeof(per_thread_t));
+    data = (per_thread_t*)dr_thread_alloc(drcontext, sizeof(per_thread_t));
     drmgr_set_tls_field(drcontext, tls_index, data);
-    data->buf_base = dr_thread_alloc(drcontext, MEM_BUF_SIZE);
+    data->buf_base = (char*)dr_thread_alloc(drcontext, MEM_BUF_SIZE);
     data->buf_ptr = data->buf_base;
     /* set buf_end to be negative of address of buffer end for the lea later */
     data->buf_end = -(ptr_int_t)(data->buf_base + MEM_BUF_SIZE);
@@ -242,7 +245,7 @@ event_thread_exit(void *drcontext)
     per_thread_t *data;
 
     memtrace(drcontext);
-    data = drmgr_get_tls_field(drcontext, tls_index);
+    data = (per_thread_t*)drmgr_get_tls_field(drcontext, tls_index);
     dr_mutex_lock(mutex);
     global_num_refs += data->num_refs;
     dr_mutex_unlock(mutex);
@@ -302,11 +305,8 @@ memtrace(void *drcontext)
     per_thread_t *data;
     int num_refs;
     mem_ref_t *mem_ref;
-#ifdef OUTPUT_TEXT
-    int i;
-#endif
 
-    data = drmgr_get_tls_field(drcontext, tls_index);
+    data = (per_thread_t*)drmgr_get_tls_field(drcontext, tls_index);
     mem_ref = (mem_ref_t *)data->buf_base;
     num_refs = (int)((mem_ref_t *)data->buf_ptr - mem_ref);
 
@@ -346,7 +346,7 @@ code_cache_init(void)
 
     drcontext = dr_get_current_drcontext();
     code_cache =
-        dr_nonheap_alloc(page_size, DR_MEMPROT_READ | DR_MEMPROT_WRITE | DR_MEMPROT_EXEC);
+	    (app_pc)dr_nonheap_alloc(page_size, DR_MEMPROT_READ | DR_MEMPROT_WRITE | DR_MEMPROT_EXEC);
     ilist = instrlist_create(drcontext);
     /* The lean procedure simply performs a clean call, and then jumps back
      * to the DR code cache.
@@ -382,8 +382,9 @@ instrument_mem(void *drcontext, instrlist_t *ilist, instr_t *where, int pos, boo
     reg_id_t reg1, reg2;
     drvector_t allowed;
     per_thread_t *data;
+    app_pc pc;
 
-    data = drmgr_get_tls_field(drcontext, tls_index);
+    data = (per_thread_t*)drmgr_get_tls_field(drcontext, tls_index);
 
     /* Steal two scratch registers.
      * reg2 must be ECX or RCX for jecxz.
@@ -444,10 +445,10 @@ instrument_mem(void *drcontext, instrlist_t *ilist, instr_t *where, int pos, boo
 
     /* Store pc in memory ref */
 //    pc = instr_get_app_pc(where);
-//    /* For 64-bit, we can't use a 64-bit immediate so we split pc into two halves.
-//     * We could alternatively load it into reg1 and then store reg1.
-//     * We use a convenience routine that does the two-step store for us.
-//     */
+    /* For 64-bit, we can't use a 64-bit immediate so we split pc into two halves.
+     * We could alternatively load it into reg1 and then store reg1.
+     * We use a convenience routine that does the two-step store for us.
+     */
 //    opnd1 = OPND_CREATE_MEMPTR(reg2, offsetof(mem_ref_t, pc));
 //    instrlist_insert_mov_immed_ptrsz(drcontext, (ptr_int_t)pc, opnd1, ilist, where, NULL,
 //                                     NULL);
@@ -515,4 +516,6 @@ instrument_mem(void *drcontext, instrlist_t *ilist, instr_t *where, int pos, boo
     if (drreg_unreserve_register(drcontext, ilist, where, reg1) != DRREG_SUCCESS ||
         drreg_unreserve_register(drcontext, ilist, where, reg2) != DRREG_SUCCESS)
         DR_ASSERT(false);
+}
+
 }

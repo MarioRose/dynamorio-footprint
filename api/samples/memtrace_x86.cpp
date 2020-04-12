@@ -98,12 +98,15 @@ typedef struct {
     /* buf_end holds the negative value of real address of buffer end. */
     ptr_int_t buf_end;
     void *cache;
-    file_t log;
-
-    FILE *logf;
 
     uint64 num_refs;
 } per_thread_t;
+
+file_t logging;
+
+FILE *logfile;
+
+FootprintCalculator footprintCalculator;
 
 static size_t page_size;
 static client_id_t client_id;
@@ -130,6 +133,8 @@ static void
 clean_call(void);
 static void
 memtrace(void *drcontext);
+static void
+calculateFootprints(void);
 static void
 code_cache_init(void);
 static void
@@ -185,6 +190,8 @@ dr_client_main(client_id_t id, int argc, const char *argv[])
 static void
 event_exit()
 {
+	calculateFootprints();
+	log_stream_close(logfile); /* closes fd too */
 #ifdef SHOW_RESULTS
     char msg[512];
     int len;
@@ -235,15 +242,15 @@ event_thread_init(void *drcontext)
      * the same directory as our library. We could also pass
      * in a path as a client argument.
      */
-    data->log =
+    logging =
         log_file_open(client_id, drcontext, NULL /* using client lib path */, "memtrace",
 #ifndef WINDOWS
                       DR_FILE_CLOSE_ON_FORK |
 #endif
                           DR_FILE_ALLOW_LARGE);
 
-    data->logf = log_stream_from_file(data->log);
-    fprintf(data->logf,
+    logfile = log_stream_from_file(logging);
+    fprintf(logfile,
             "Format: <instr address>,<(r)ead/(w)rite>,<data size>,<data address>\n");
 }
 
@@ -257,8 +264,6 @@ event_thread_exit(void *drcontext)
     dr_mutex_lock(mutex);
     global_num_refs += data->num_refs;
     dr_mutex_unlock(mutex);
-
-    log_stream_close(data->logf); /* closes fd too */
 
     dr_thread_free(drcontext, data->buf_base, MEM_BUF_SIZE);
     dr_thread_free(drcontext, data, sizeof(per_thread_t));
@@ -316,14 +321,8 @@ memtrace(void *drcontext)
     mem_ref = (mem_ref_t *)data->buf_base;
     num_refs = (int)((mem_ref_t *)data->buf_ptr - mem_ref);
 
-    FootprintCalculator footprintCalculator{mem_ref, num_refs};
+    footprintCalculator.addMemoryReferences(mem_ref, num_refs);
 
-    for (std::uint64_t i = 0; i < num_refs; i++) {
-    	auto const w = pow(2, i);
-    	if (w > num_refs) break;
-    	auto const averageFootprint = footprintCalculator.calculateAverageFootprint(w);
-    	fprintf(data->logf, "%f: %f \n", w, averageFootprint);
-    }
     /* We use libc's fprintf as it is buffered and much faster than dr_fprintf
      * for repeated printing that dominates performance, as the printing does here.
      */
@@ -336,6 +335,16 @@ memtrace(void *drcontext)
     memset(data->buf_base, 0, MEM_BUF_SIZE);
     data->num_refs += num_refs;
     data->buf_ptr = data->buf_base;
+}
+
+static void
+calculateFootprints(void) {
+	for (std::uint64_t i = 0; i < global_num_refs; i++) {
+		auto const w = pow(2, i);
+		if (w > global_num_refs) break;
+		auto const averageFootprint = footprintCalculator.calculateAverageFootprint(w);
+		fprintf(logfile, "%f: %f \n", w, averageFootprint);
+	}
 }
 
 /* clean_call dumps the memory reference info to the log file */

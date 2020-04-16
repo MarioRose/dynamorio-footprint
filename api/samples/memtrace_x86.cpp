@@ -69,6 +69,7 @@ extern "C" {
 }
 
 #include "/home/mario/Masterarbeit/memory_metrics/include/memory_metrics/FootprintCalculator.h++"
+#include <chrono>
 using memory_metrics::FootprintCalculator ;
 
 //#include "/home/mario/Masterarbeit/memory_metrics/include/memory_metrics/MemoryReference.h++"
@@ -108,6 +109,9 @@ FILE *logfile;
 
 FootprintCalculator footprintCalculator;
 
+std::chrono::steady_clock::time_point startTime;
+std::chrono::steady_clock::time_point endTime;
+
 static size_t page_size;
 static client_id_t client_id;
 static app_pc code_cache;
@@ -145,6 +149,7 @@ instrument_mem(void *drcontext, instrlist_t *ilist, instr_t *where, int pos, boo
 DR_EXPORT void
 dr_client_main(client_id_t id, int argc, const char *argv[])
 {
+	startTime = std::chrono::steady_clock::now();
     /* We need 2 reg slots beyond drreg's eflags slots => 3 slots */
     drreg_options_t ops = { sizeof(ops), 3, false };
     /* Specify priority relative to other instrumentation operations: */
@@ -202,7 +207,17 @@ event_exit()
     DR_ASSERT(len > 0);
     NULL_TERMINATE_BUFFER(msg);
     DISPLAY_STRING(msg);
+
 #endif /* SHOW_RESULTS */
+    endTime = std::chrono::steady_clock::now();
+    char msg2[512];
+    int len2;
+    len2 = dr_snprintf(msg2, sizeof(msg2) / sizeof(msg2[0]),
+			  "Elapsed Time: %llu",
+		       (std::chrono::duration_cast<std::chrono::seconds>(endTime - startTime).count()));
+	DR_ASSERT(len2 > 0);
+	NULL_TERMINATE_BUFFER(msg2);
+	DISPLAY_STRING(msg2);
     code_cache_exit();
 
     if (!drmgr_unregister_tls_field(tls_index) ||
